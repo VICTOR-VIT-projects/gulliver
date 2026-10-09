@@ -76,7 +76,7 @@ export class QlooError extends Error {
 
 interface Fetched {
   status: number;
-  body: unknown;
+  results: unknown;
   attempts: number;
   fetchedAt: number;
 }
@@ -125,21 +125,29 @@ const fetchQloo = unstable_cache(
       });
     }
 
-    const body: unknown = await res.json().catch(() => null);
+    const body = (await res.json().catch(() => null)) as { results?: unknown; errors?: { message?: string }[] } | unknown[] | null;
     if (!res.ok) {
-      const errors = (body as { errors?: { message?: string }[] } | null)?.errors;
+      const errors = Array.isArray(body) ? undefined : body?.errors;
       const detail = errors?.map((e) => e.message).join("; ") || `HTTP ${res.status}`;
       throw new QlooError("http", res.status, detail, attempts);
     }
-    return { status: res.status, body, attempts, fetchedAt: Date.now() };
+    // /search returns a bare array; everything else wraps rows in `results`. Validate here so a
+    // malformed 200 is never cached.
+    const results = Array.isArray(body) ? body : body?.results;
+    if (results === undefined || results === null) {
+      throw new QlooError("http", res.status, "Response had no results", attempts);
+    }
+    return { status: res.status, results, attempts, fetchedAt: Date.now() };
   },
-  ["qloo-v1"],
+  ["qloo-v2"],
   { revalidate: ONE_DAY },
 );
 
-function beforeDeadline<T>(work: Promise<T>, deadline?: AbortSignal): Promise<T> {
-  if (!deadline) return work;
+/** Starts `start()` only if the deadline hasn't passed, then rejects early if it passes mid-flight. */
+function beforeDeadline<T>(start: () => Promise<T>, deadline?: AbortSignal): Promise<T> {
+  if (!deadline) return start();
   if (deadline.aborted) return Promise.reject(new QlooError("deadline", null, "Brief deadline reached"));
+  const work = start();
   return new Promise((resolve, reject) => {
     const onAbort = () => reject(new QlooError("deadline", null, "Brief deadline reached"));
     deadline.addEventListener("abort", onAbort, { once: true });
@@ -177,20 +185,16 @@ export async function qloo<T>(path: string, params: Params, ctx: CallContext): P
 
   let fetched: Fetched;
   try {
-    fetched = await beforeDeadline(fetchQloo(url), ctx.deadline);
+    fetched = await beforeDeadline(() => fetchQloo(url), ctx.deadline);
   } catch (err) {
     const e = err instanceof QlooError ? err : new QlooError("network", null, "Unexpected failure");
     record({ status: e.status, failure: e.kind, attempts: e.attempts, cached: false, rows: 0 });
     throw e;
   }
 
-  const body = fetched.body as { results?: T } | T[] | null;
-  const results = (Array.isArray(body) ? body : body?.results) as T | undefined;
-  const cached = fetched.fetchedAt < started;
-  if (results === undefined) {
-    record({ status: fetched.status, failure: "http", attempts: fetched.attempts, cached, rows: 0 });
-    throw new QlooError("http", fetched.status, `Qloo ${path} returned no results field`);
-  }
+  const results = fetched.results as T;
+  // A miss always includes a network round trip, so it finishes strictly after `started`.
+  const cached = fetched.fetchedAt <= started;
   const evidenceId = record({ status: fetched.status, attempts: fetched.attempts, cached, rows: countRows(results) });
   return { results, evidenceId };
 }

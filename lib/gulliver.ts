@@ -230,32 +230,25 @@ export async function findSponsors(act: Act, run: Run, take = 8): Promise<Sponso
   });
 }
 
-export async function findMedia(act: Act, run: Run): Promise<{ podcasts: MediaPick[]; shows: MediaPick[] }> {
-  const pick = async (type: string, label: string) => {
-    const { results } = await qloo<{ entities: QlooEntity[] }>(
-      "/v2/insights",
-      { "filter.type": type, "signal.interests.entities": act.id, take: 5 },
-      { label, ...run },
-    );
-    return results.entities.map((e) => ({
-      id: e.entity_id,
-      name: e.name,
-      image: imageOf(e),
-      affinity: affinityOf(e),
-      description: str(e.properties?.short_description) ?? str(e.properties?.description),
-    }));
-  };
-  // Wait for both so neither call outlives the brief; one empty list is still a useful section.
-  const [podcasts, shows] = await Promise.allSettled([
-    pick("urn:entity:podcast", "Podcasts the audience over-indexes on"),
-    pick("urn:entity:tv_show", "TV the audience over-indexes on"),
-  ]);
-  if (podcasts.status === "rejected" && shows.status === "rejected") throw podcasts.reason;
-  return {
-    podcasts: podcasts.status === "fulfilled" ? podcasts.value : [],
-    shows: shows.status === "fulfilled" ? shows.value : [],
-  };
+async function findMedia(act: Act, run: Run, type: string, label: string): Promise<MediaPick[]> {
+  const { results } = await qloo<{ entities: QlooEntity[] }>(
+    "/v2/insights",
+    { "filter.type": type, "signal.interests.entities": act.id, take: 5 },
+    { label, ...run },
+  );
+  return results.entities.map((e) => ({
+    id: e.entity_id,
+    name: e.name,
+    image: imageOf(e),
+    affinity: affinityOf(e),
+    description: str(e.properties?.short_description) ?? str(e.properties?.description),
+  }));
 }
+
+export const findPodcasts = (act: Act, run: Run) =>
+  findMedia(act, run, "urn:entity:podcast", "Podcasts the audience over-indexes on");
+
+export const findShows = (act: Act, run: Run) => findMedia(act, run, "urn:entity:tv_show", "TV the audience over-indexes on");
 
 /** Skew scores in [-1, 1] relative to the general population, not shares of the audience. */
 export async function findAudience(act: Act, run: Run): Promise<Audience | null> {

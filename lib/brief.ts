@@ -4,8 +4,9 @@ import {
   fanNight,
   findAudience,
   findMarkets,
-  findMedia,
+  findPodcasts,
   findOpeners,
+  findShows,
   findSponsors,
   getAct,
   openerFit,
@@ -28,7 +29,8 @@ export interface Brief {
   openers: Section<Data<typeof findOpeners>>;
   openerFit: Section<{ openerId: string } & Data<typeof openerFit>>;
   sponsors: Section<Data<typeof findSponsors>>;
-  media: Section<Data<typeof findMedia>>;
+  podcasts: Section<Data<typeof findPodcasts>>;
+  shows: Section<Data<typeof findShows>>;
   audience: Section<Data<typeof findAudience>>;
   fanNight: Section<{ venue: string; spots: Data<typeof fanNight> }>;
   evidence: Evidence[];
@@ -72,11 +74,12 @@ export async function gatherBrief(actId: string): Promise<Brief | null> {
   const act = await getAct(actId, run);
   if (!act) return null;
 
-  const [markets, openers, sponsors, media, audience] = await Promise.all([
+  const [markets, openers, sponsors, podcasts, shows, audience] = await Promise.all([
     settle(findMarkets(act, run)),
     settle(findOpeners(act, run)),
     settle(findSponsors(act, run)),
-    settle(findMedia(act, run)),
+    settle(findPodcasts(act, run)),
+    settle(findShows(act, run)),
     settle(findAudience(act, run)),
   ]);
 
@@ -108,7 +111,8 @@ export async function gatherBrief(actId: string): Promise<Brief | null> {
     openers,
     openerFit: fit,
     sponsors,
-    media,
+    podcasts,
+    shows,
     audience,
     fanNight: night,
     evidence: ledger.entries,
