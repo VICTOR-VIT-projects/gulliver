@@ -1,8 +1,10 @@
 import "server-only";
+import { unstable_cache } from "next/cache";
 
 const BASE_URL = "https://hackathon.api.qloo.com";
 const ONE_DAY = 60 * 60 * 24;
-const TIMEOUT_MS = 15_000;
+const ATTEMPT_TIMEOUT_MS = 8_000;
+const RETRY_AFTER_MS = 1_100;
 const RETRYABLE = new Set([429, 502, 503, 504]);
 // Hackathon keys allow 5 requests/second (x-second-ratelimit-limit) and 10k/month.
 const MIN_GAP_MS = 220;
@@ -33,13 +35,19 @@ export interface HeatCell {
   query: { affinity: number; affinity_rank: number; popularity: number };
 }
 
-/** One Qloo request, recorded so the brief can show exactly where each number came from. */
+export type FailureKind = "http" | "timeout" | "network" | "deadline" | "config";
+
+/** One Qloo call as the user sees it in the evidence drawer. */
 export interface Evidence {
   id: string;
   label: string;
   path: string;
   params: Record<string, string>;
-  status: number;
+  /** HTTP status of the final attempt; null when no response arrived. */
+  status: number | null;
+  failure?: FailureKind;
+  attempts: number;
+  cached: boolean;
   rows: number;
   ms: number;
 }
@@ -56,12 +64,87 @@ export class Ledger {
 
 export class QlooError extends Error {
   constructor(
-    readonly status: number,
+    readonly kind: FailureKind,
+    readonly status: number | null,
     message: string,
+    readonly attempts = 0,
   ) {
     super(message);
     this.name = "QlooError";
   }
+}
+
+interface Fetched {
+  status: number;
+  body: unknown;
+  attempts: number;
+  fetchedAt: number;
+}
+
+// ponytail: per-instance throttle; concurrent serverless instances can still exceed 5/s together.
+// The retry absorbs that, and cache hits never reach it. Move to a shared limiter if 429s show up in logs.
+let nextSlot = 0;
+async function throttle() {
+  const now = Date.now();
+  const wait = Math.max(0, nextSlot - now);
+  nextSlot = Math.max(now, nextSlot) + MIN_GAP_MS;
+  if (wait) await new Promise((r) => setTimeout(r, wait));
+}
+
+async function attempt(url: string, apiKey: string): Promise<Response> {
+  await throttle();
+  try {
+    return await fetch(url, {
+      headers: { "X-Api-Key": apiKey },
+      signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
+      cache: "no-store",
+    });
+  } catch (err) {
+    const timedOut = err instanceof DOMException && err.name === "TimeoutError";
+    throw new QlooError(timedOut ? "timeout" : "network", null, timedOut ? "Qloo timed out" : "Qloo unreachable", 1);
+  }
+}
+
+/**
+ * Network path, shared across instances through Next's data cache. Only successful responses are
+ * cached: failures throw, and unstable_cache doesn't store rejections. Qloo's "System Error" 500s
+ * are deterministic for a given query, so only rate limits and gateway errors are retried.
+ */
+const fetchQloo = unstable_cache(
+  async (url: string): Promise<Fetched> => {
+    const apiKey = process.env.QLOO_API_KEY;
+    if (!apiKey) throw new QlooError("config", null, "QLOO_API_KEY is not configured");
+
+    let attempts = 1;
+    let res = await attempt(url, apiKey);
+    if (RETRYABLE.has(res.status)) {
+      await new Promise((r) => setTimeout(r, RETRY_AFTER_MS));
+      attempts++;
+      res = await attempt(url, apiKey).catch((err: QlooError) => {
+        throw new QlooError(err.kind, null, err.message, attempts);
+      });
+    }
+
+    const body: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      const errors = (body as { errors?: { message?: string }[] } | null)?.errors;
+      const detail = errors?.map((e) => e.message).join("; ") || `HTTP ${res.status}`;
+      throw new QlooError("http", res.status, detail, attempts);
+    }
+    return { status: res.status, body, attempts, fetchedAt: Date.now() };
+  },
+  ["qloo-v1"],
+  { revalidate: ONE_DAY },
+);
+
+function beforeDeadline<T>(work: Promise<T>, deadline?: AbortSignal): Promise<T> {
+  if (!deadline) return work;
+  if (deadline.aborted) return Promise.reject(new QlooError("deadline", null, "Brief deadline reached"));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(new QlooError("deadline", null, "Brief deadline reached"));
+    deadline.addEventListener("abort", onAbort, { once: true });
+    work.then(resolve, reject).finally(() => deadline.removeEventListener("abort", onAbort));
+  });
 }
 
 function clean(params: Params): Record<string, string> {
@@ -78,65 +161,37 @@ function countRows(results: unknown): number {
   return 0;
 }
 
-// ponytail: per-instance throttle; concurrent serverless instances can still exceed 5/s together.
-// The retry below absorbs that; move to a shared limiter (e.g. Upstash) if 429s show up in logs.
-let nextSlot = 0;
-async function throttle() {
-  const now = Date.now();
-  const wait = Math.max(0, nextSlot - now);
-  nextSlot = Math.max(now, nextSlot) + MIN_GAP_MS;
-  if (wait) await new Promise((r) => setTimeout(r, wait));
+export interface CallContext {
+  label: string;
+  ledger?: Ledger;
+  deadline?: AbortSignal;
 }
 
-async function send(url: string, apiKey: string): Promise<Response> {
-  await throttle();
-  return fetch(url, {
-    headers: { "X-Api-Key": apiKey },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-    next: { revalidate: ONE_DAY },
-  });
-}
-
-/**
- * GET a Qloo endpoint. Responses are cached server-side for a day (allowed by the hackathon rules;
- * nothing is persisted to the repo). Retries once on rate limits and gateway errors, after the
- * per-second window resets. Qloo's "System Error" 500s are deterministic for a given query, so
- * those are not retried.
- */
-export async function qloo<T>(
-  path: string,
-  params: Params,
-  meta: { label: string; ledger?: Ledger },
-): Promise<{ results: T; evidenceId?: string }> {
-  const apiKey = process.env.QLOO_API_KEY;
-  if (!apiKey) throw new QlooError(500, "QLOO_API_KEY is not configured");
-
+/** GET a Qloo endpoint and record the call (success or failure) in the brief's ledger. */
+export async function qloo<T>(path: string, params: Params, ctx: CallContext): Promise<{ results: T; evidenceId?: string }> {
   const query = clean(params);
   const url = `${BASE_URL}${path}?${new URLSearchParams(query)}`;
   const started = Date.now();
+  const record = (e: Pick<Evidence, "status" | "failure" | "attempts" | "cached" | "rows">) =>
+    ctx.ledger?.record({ label: ctx.label, path, params: query, ms: Date.now() - started, ...e });
 
-  let res = await send(url, apiKey);
-  if (RETRYABLE.has(res.status)) {
-    await new Promise((r) => setTimeout(r, 1_100));
-    res = await send(url, apiKey);
+  let fetched: Fetched;
+  try {
+    fetched = await beforeDeadline(fetchQloo(url), ctx.deadline);
+  } catch (err) {
+    const e = err instanceof QlooError ? err : new QlooError("network", null, "Unexpected failure");
+    record({ status: e.status, failure: e.kind, attempts: e.attempts, cached: false, rows: 0 });
+    throw e;
   }
 
-  const body = (await res.json().catch(() => null)) as { results?: T; errors?: { message: string }[] } | null;
-  const results = (body?.results ?? (Array.isArray(body) ? body : undefined)) as T | undefined;
-
-  const evidenceId = meta.ledger?.record({
-    label: meta.label,
-    path,
-    params: query,
-    status: res.status,
-    rows: countRows(results),
-    ms: Date.now() - started,
-  });
-
-  if (!res.ok || results === undefined) {
-    const message = body?.errors?.map((e) => e.message).join("; ") || `Qloo ${path} returned ${res.status}`;
-    throw new QlooError(res.status, message);
+  const body = fetched.body as { results?: T } | T[] | null;
+  const results = (Array.isArray(body) ? body : body?.results) as T | undefined;
+  const cached = fetched.fetchedAt < started;
+  if (results === undefined) {
+    record({ status: fetched.status, failure: "http", attempts: fetched.attempts, cached, rows: 0 });
+    throw new QlooError("http", fetched.status, `Qloo ${path} returned no results field`);
   }
+  const evidenceId = record({ status: fetched.status, attempts: fetched.attempts, cached, rows: countRows(results) });
   return { results, evidenceId };
 }
 

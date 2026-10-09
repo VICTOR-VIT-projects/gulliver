@@ -1,6 +1,12 @@
 import "server-only";
 import { imageOf, num, qloo, str, type HeatCell, type Ledger, type QlooEntity } from "./qloo";
 
+/** Per-brief context threaded through every Qloo call. */
+export interface Run {
+  ledger: Ledger;
+  deadline?: AbortSignal;
+}
+
 export type ActKind = "artist" | "comedian";
 
 export interface Act {
@@ -101,18 +107,22 @@ export async function searchActs(query: string): Promise<Act[]> {
   ];
 }
 
-export async function getAct(id: string): Promise<Act | null> {
-  const { results } = await qloo<QlooEntity[]>("/entities", { entity_ids: id }, { label: "Look up act" });
+/** Resolves an id to an act. Venues, brands and non-comedian people return null. */
+export async function getAct(id: string, run: Run): Promise<Act | null> {
+  const { results } = await qloo<QlooEntity[]>("/entities", { entity_ids: id }, { label: "Look up the act", ...run });
   const e = results[0];
+  const types = e?.types ?? (e?.subtype ? [e.subtype] : []);
   if (!e) return null;
-  return toAct(e, isComedian(e) ? "comedian" : "artist");
+  if (types.includes("urn:entity:artist")) return toAct(e, "artist");
+  if (types.includes("urn:entity:person") && isComedian(e)) return toAct(e, "comedian");
+  return null;
 }
 
 /**
  * One query across the US, capped at one venue per metro, so affinities are comparable between
  * markets. Diversifying by city instead lets one metro's suburbs crowd the list.
  */
-export async function findMarkets(act: Act, ledger: Ledger, take = 20): Promise<Market[]> {
+export async function findMarkets(act: Act, run: Run, take = 20): Promise<Market[]> {
   const { results } = await qloo<{ entities: QlooEntity[] }>(
     "/v2/insights",
     {
@@ -124,7 +134,7 @@ export async function findMarkets(act: Act, ledger: Ledger, take = 20): Promise<
       "diversify.take": 1,
       take,
     },
-    { label: "Best-fit venue in each US metro", ledger },
+    { label: "Best-fit venue in each US metro", ...run },
   );
   return results.entities.flatMap((e) => {
     const geo = (e.properties?.geocode ?? {}) as Record<string, unknown>;
@@ -154,7 +164,7 @@ export async function findMarkets(act: Act, ledger: Ledger, take = 20): Promise<
  * Neighbourhood-level affinity (geohash cells) within 40 km of a venue. Querying by point rather
  * than by city name keeps suburban venues from collapsing to a handful of cells.
  */
-export async function cityPulse(act: Act, market: Market, ledger: Ledger): Promise<HeatCell[]> {
+export async function cityPulse(act: Act, market: Market, run: Run): Promise<HeatCell[]> {
   const { results } = await qloo<{ heatmap: HeatCell[] }>(
     "/v2/insights",
     {
@@ -163,18 +173,18 @@ export async function cityPulse(act: Act, market: Market, ledger: Ledger): Promi
       "filter.location": `POINT(${market.venue.lon} ${market.venue.lat})`,
       "filter.location.radius": 40_000,
     },
-    { label: `Affinity heatmap around ${market.metro}`, ledger },
+    { label: `Affinity heatmap around ${market.metro}`, ...run },
   );
   return results.heatmap;
 }
 
-export async function findOpeners(act: Act, ledger: Ledger, take = 8): Promise<Opener[]> {
+export async function findOpeners(act: Act, run: Run, take = 8): Promise<Opener[]> {
   const { results } = await qloo<{ entities: QlooEntity[] }>(
     "/v2/insights",
     act.kind === "comedian"
       ? { "filter.type": "urn:entity:person", "filter.tags": TAGS.comedian, "signal.interests.entities": act.id, take }
       : { "filter.type": "urn:entity:artist", "signal.interests.entities": act.id, "bias.trends": "high", take },
-    { label: act.kind === "comedian" ? "Comedians with a shared audience" : "Artists with a shared audience", ledger },
+    { label: act.kind === "comedian" ? "Comedians with a shared audience" : "Artists with a shared audience", ...run },
   );
   return results.entities
     .filter((e) => e.entity_id !== act.id)
@@ -182,12 +192,12 @@ export async function findOpeners(act: Act, ledger: Ledger, take = 8): Promise<O
 }
 
 /** What the two crowds share, and what each one brings on its own. */
-export async function openerFit(act: Act, opener: { id: string; name: string }, ledger: Ledger): Promise<OpenerFit> {
+export async function openerFit(act: Act, opener: { id: string; name: string }, run: Run): Promise<OpenerFit> {
   type Row = { name: string; query?: { score?: number } };
   const { results } = await qloo<{ tags?: Row[]; a?: Row[]; b?: Row[] }>(
     "/v2/analysis/compare",
     { "a.signal.interests.entities": act.id, "b.signal.interests.entities": opener.id, take: 10 },
-    { label: `Audience overlap, ${act.name} × ${opener.name}`, ledger },
+    { label: `Audience overlap, ${act.name} × ${opener.name}`, ...run },
   );
   const names = (rows: Row[] = [], n: number) => {
     const seen = new Map<string, string>();
@@ -197,11 +207,11 @@ export async function openerFit(act: Act, opener: { id: string; name: string }, 
   return { shared: names(results.tags, 5), headlinerOnly: names(results.a, 3), openerOnly: names(results.b, 3) };
 }
 
-export async function findSponsors(act: Act, ledger: Ledger, take = 8): Promise<Sponsor[]> {
+export async function findSponsors(act: Act, run: Run, take = 8): Promise<Sponsor[]> {
   const { results } = await qloo<{ entities: QlooEntity[] }>(
     "/v2/insights",
     { "filter.type": "urn:entity:brand", "signal.interests.entities": act.id, take },
-    { label: "Brands the audience over-indexes on", ledger },
+    { label: "Brands the audience over-indexes on", ...run },
   );
   return results.entities.map((e) => {
     const p = e.properties ?? {};
@@ -220,12 +230,12 @@ export async function findSponsors(act: Act, ledger: Ledger, take = 8): Promise<
   });
 }
 
-export async function findMedia(act: Act, ledger: Ledger): Promise<{ podcasts: MediaPick[]; shows: MediaPick[] }> {
+export async function findMedia(act: Act, run: Run): Promise<{ podcasts: MediaPick[]; shows: MediaPick[] }> {
   const pick = async (type: string, label: string) => {
     const { results } = await qloo<{ entities: QlooEntity[] }>(
       "/v2/insights",
       { "filter.type": type, "signal.interests.entities": act.id, take: 5 },
-      { label, ledger },
+      { label, ...run },
     );
     return results.entities.map((e) => ({
       id: e.entity_id,
@@ -235,19 +245,24 @@ export async function findMedia(act: Act, ledger: Ledger): Promise<{ podcasts: M
       description: str(e.properties?.short_description) ?? str(e.properties?.description),
     }));
   };
-  const [podcasts, shows] = await Promise.all([
+  // Wait for both so neither call outlives the brief; one empty list is still a useful section.
+  const [podcasts, shows] = await Promise.allSettled([
     pick("urn:entity:podcast", "Podcasts the audience over-indexes on"),
     pick("urn:entity:tv_show", "TV the audience over-indexes on"),
   ]);
-  return { podcasts, shows };
+  if (podcasts.status === "rejected" && shows.status === "rejected") throw podcasts.reason;
+  return {
+    podcasts: podcasts.status === "fulfilled" ? podcasts.value : [],
+    shows: shows.status === "fulfilled" ? shows.value : [],
+  };
 }
 
 /** Skew scores in [-1, 1] relative to the general population, not shares of the audience. */
-export async function findAudience(act: Act, ledger: Ledger): Promise<Audience | null> {
+export async function findAudience(act: Act, run: Run): Promise<Audience | null> {
   const { results } = await qloo<{ demographics: { query: Partial<Audience> }[] }>(
     "/v2/insights",
     { "filter.type": "urn:demographics", "signal.interests.entities": act.id },
-    { label: "Audience age and gender skew", ledger },
+    { label: "Audience age and gender skew", ...run },
   );
   const q = results.demographics[0]?.query;
   if (!q?.age || !q.gender) return null;
@@ -255,7 +270,7 @@ export async function findAudience(act: Act, ledger: Ledger): Promise<Audience |
 }
 
 /** Pre- and post-show spots near a venue. Chains and private clubs are filtered out by price and popularity. */
-export async function fanNight(act: Act, at: { lat: number; lon: number }, ledger: Ledger): Promise<Spot[]> {
+export async function fanNight(act: Act, at: { lat: number; lon: number }, run: Run): Promise<Spot[]> {
   const base = {
     "filter.type": "urn:entity:place",
     "filter.tags": TAGS.nightOut,
@@ -267,13 +282,13 @@ export async function fanNight(act: Act, at: { lat: number; lon: number }, ledge
   let { results } = await qloo<{ entities: QlooEntity[] }>(
     "/v2/insights",
     { ...base, "filter.price_level.min": 2, "filter.popularity.min": 0.5 },
-    { label: "Bars and restaurants near the venue", ledger },
+    { label: "Bars and restaurants near the venue", ...run },
   );
   if (results.entities.length < 3) {
     ({ results } = await qloo<{ entities: QlooEntity[] }>(
       "/v2/insights",
       { ...base, "filter.location.radius": 6000, "filter.price_level.min": 2 },
-      { label: "Bars and restaurants within 6 km of the venue", ledger },
+      { label: "Bars and restaurants within 6 km of the venue", ...run },
     ));
   }
   return results.entities.flatMap((e) =>
