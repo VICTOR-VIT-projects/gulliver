@@ -21,6 +21,7 @@ Deadline: **Oct 31, 9:15 AM IST** (= Oct 30, 11:45 PM ET). Internal target: **Oc
 - [ ] Key lives only in `.env` / Vercel env vars; the browser never calls Qloo directly
 - [ ] Use `/search` (or `/v2/tags`) to get IDs, then pass them to `/v2/insights`; no legacy `/recommendations`
 - [ ] Bounded retries, no bulk scraping; results cached server-side (allowed)
+- [ ] **Quota: 5 req/s and 10,000 req/month** (from response headers, Oct 9). One brief is about 10 calls. The monthly window resets around **Nov 8**, in the middle of judging, so keep October dev usage under about 5k and leave the rest for judges. Saved briefs are re-read from the database, not re-queried. Ask in #api-help on Discord for more if needed.
 - [ ] **No Qloo response data committed to the public repo** (`.gitignore` blocks `*.qloo.json`; no fixtures)
 - [ ] UI states that results are aggregate affinities, not an individual's identity, preferences, or future behaviour
 

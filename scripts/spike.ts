@@ -52,7 +52,7 @@ const [comic] = await check(`search "${comedianName}"`, "/search", { query: come
 if (!artist) throw new Error("artist not resolved — nothing else will work");
 const sig = { "signal.interests.entities": artist.entity_id };
 
-const venues = await check("markets: venues nationwide, 1 per city", "/v2/insights", { "filter.type": "urn:entity:place", "filter.tags": VENUE_TAGS, ...sig, "filter.location.query": "United States", "diversify.by": "properties.geocode.city", "diversify.take": "1", take: "25" });
+const venues = await check("markets: venues nationwide, 1 per metro", "/v2/insights", { "filter.type": "urn:entity:place", "filter.tags": VENUE_TAGS, ...sig, "filter.location.query": "United States", "diversify.by": "properties.geocode.metro", "diversify.take": "1", take: "25" });
 const topCity = venues[0]?.properties?.geocode?.city ?? "Chicago";
 await check(`zoom: heatmap ${topCity}`, "/v2/insights", { "filter.type": "urn:heatmap", ...sig, "filter.location.query": topCity });
 const openers = await check("openers", "/v2/insights", { "filter.type": "urn:entity:artist", ...sig, "bias.trends": "high", "feature.explainability": "true", take: "10" });
@@ -66,7 +66,7 @@ const v = venues[0]?.location;
 if (!Number.isFinite(v?.lat) || !Number.isFinite(v?.lon)) skip("fan night near top venue", "top venue has no usable lat/lon");
 else await check("fan night near top venue", "/v2/insights", { "filter.type": "urn:entity:place", "filter.tags": NIGHT_TAGS, ...sig, "filter.location": `POINT(${v.lon} ${v.lat})`, "filter.location.radius": "2000", take: "6" });
 if (!comic) skip("comedy venues", `"${comedianName}" not found`);
-else await check("comedy venues", "/v2/insights", { "filter.type": "urn:entity:place", "filter.tags": COMEDY_TAGS, "signal.interests.entities": comic.entity_id, "filter.location.query": "United States", "diversify.by": "properties.geocode.city", "diversify.take": "1", take: "10" });
+else await check("comedy venues", "/v2/insights", { "filter.type": "urn:entity:place", "filter.tags": COMEDY_TAGS, "signal.interests.entities": comic.entity_id, "filter.location.query": "United States", "diversify.by": "properties.geocode.metro", "diversify.take": "1", take: "10" });
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll checks passed");
 process.exitCode = failures ? 1 : 0;
