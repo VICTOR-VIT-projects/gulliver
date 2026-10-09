@@ -6,6 +6,8 @@
 
 ## Run locally
 
+Requires Node 22.18+ (the health-check script uses Node's built-in TypeScript support).
+
 ```bash
 git clone https://github.com/VICTOR-VIT-projects/gulliver && cd gulliver
 cp .env.example .env   # add QLOO_API_KEY and OPENROUTER_API_KEY

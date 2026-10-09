@@ -1,7 +1,7 @@
 node_modules/
 .next/
-.env
-.env*.local
+.env*
+!.env.example
 .vercel/
 # Never commit Qloo response data (hackathon rules)
 *.qloo.json

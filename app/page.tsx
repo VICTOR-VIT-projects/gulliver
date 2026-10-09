@@ -4,8 +4,9 @@ export default function Home() {
       <h1 className="text-5xl font-semibold tracking-tight">Gulliver</h1>
       <p className="text-xl text-stone-300">Every city, sized up.</p>
       <p className="text-stone-400">
-        Tour intelligence for promoters, venues and talent agents: where an act&apos;s fans really are, who should
-        open, which brands fit, grounded in Qloo&apos;s taste graph. Under construction.
+        Tour intelligence for promoters, venues and talent agents: the markets, support acts and brands that share
+        an act&apos;s audience taste, based on aggregate affinity data from Qloo. It doesn&apos;t forecast ticket
+        sales or describe any individual fan. Under construction.
       </p>
     </main>
   );

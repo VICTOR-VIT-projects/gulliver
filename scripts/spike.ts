@@ -17,9 +17,24 @@ const NIGHT_TAGS = "urn:tag:category:place:bar,urn:tag:category:place:restaurant
 
 let failures = 0;
 
+function skip(label: string, reason: string) {
+  failures++;
+  console.log(`SKIP          ${label}: ${reason}`);
+}
+
 async function check(label: string, path: string, params: Record<string, string>) {
   const t = Date.now();
-  const res = await fetch(`${BASE}${path}?${new URLSearchParams(params)}`, { headers: { "X-Api-Key": KEY! } });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}?${new URLSearchParams(params)}`, {
+      headers: { "X-Api-Key": KEY! },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (e) {
+    failures++;
+    console.log(`FAIL  -  ${String(Date.now() - t).padStart(4)}ms  ${label}: ${(e as Error).message}`);
+    return [];
+  }
   const body: any = await res.json().catch(() => ({}));
   const r = body?.results ?? {};
   const key = Array.isArray(r) ? null : Object.keys(r).find((k) => Array.isArray(r[k]) && r[k].length);
@@ -41,14 +56,17 @@ const venues = await check("markets: venues nationwide, 1 per city", "/v2/insigh
 const topCity = venues[0]?.properties?.geocode?.city ?? "Chicago";
 await check(`zoom: heatmap ${topCity}`, "/v2/insights", { "filter.type": "urn:heatmap", ...sig, "filter.location.query": topCity });
 const openers = await check("openers", "/v2/insights", { "filter.type": "urn:entity:artist", ...sig, "bias.trends": "high", "feature.explainability": "true", take: "10" });
-if (openers[0]) await check("opener fit (compare)", "/v2/analysis/compare", { "a.signal.interests.entities": artist.entity_id, "b.signal.interests.entities": openers[0].entity_id, take: "10" });
+if (!openers[0]) skip("opener fit (compare)", "no opener to compare");
+else await check("opener fit (compare)", "/v2/analysis/compare", { "a.signal.interests.entities": artist.entity_id, "b.signal.interests.entities": openers[0].entity_id, take: "10" });
 await check("sponsors", "/v2/insights", { "filter.type": "urn:entity:brand", ...sig, "feature.explainability": "true", take: "10" });
 await check("media: podcasts", "/v2/insights", { "filter.type": "urn:entity:podcast", ...sig, take: "5" });
 await check("media: tv", "/v2/insights", { "filter.type": "urn:entity:tv_show", ...sig, take: "5" });
 await check("audience", "/v2/insights", { "filter.type": "urn:demographics", ...sig });
 const v = venues[0]?.location;
-if (v) await check("fan night near top venue", "/v2/insights", { "filter.type": "urn:entity:place", "filter.tags": NIGHT_TAGS, ...sig, "filter.location": `POINT(${v.lon} ${v.lat})`, "filter.location.radius": "2000", take: "6" });
-if (comic) await check("comedy venues", "/v2/insights", { "filter.type": "urn:entity:place", "filter.tags": COMEDY_TAGS, "signal.interests.entities": comic.entity_id, "filter.location.query": "United States", "diversify.by": "properties.geocode.city", "diversify.take": "1", take: "10" });
+if (!Number.isFinite(v?.lat) || !Number.isFinite(v?.lon)) skip("fan night near top venue", "top venue has no usable lat/lon");
+else await check("fan night near top venue", "/v2/insights", { "filter.type": "urn:entity:place", "filter.tags": NIGHT_TAGS, ...sig, "filter.location": `POINT(${v.lon} ${v.lat})`, "filter.location.radius": "2000", take: "6" });
+if (!comic) skip("comedy venues", `"${comedianName}" not found`);
+else await check("comedy venues", "/v2/insights", { "filter.type": "urn:entity:place", "filter.tags": COMEDY_TAGS, "signal.interests.entities": comic.entity_id, "filter.location.query": "United States", "diversify.by": "properties.geocode.city", "diversify.take": "1", take: "10" });
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nAll checks passed");
 process.exitCode = failures ? 1 : 0;

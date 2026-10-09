@@ -51,5 +51,6 @@ Deadline: **Oct 31, 9:15 AM IST** (= Oct 30, 11:45 PM ET). Internal target: **Oc
 ## 6. Final pre-submit sweep (Oct 29)
 - [ ] `node --env-file=.env scripts/smoke.ts <prod-url>` passes
 - [ ] Incognito desktop + phone run of every preset
-- [ ] `git log -p | grep -i "api[_-]key\|sk-or-"` is empty; no `.env` in history
+- [ ] No key *values* in history: `git log -p | grep -E "sk-or-v1-[A-Za-z0-9]{8}|_API_KEY=[^[:space:]]+"` is empty
+- [ ] No env files in history: `git log --all --name-only --format= | grep -E "^\.env" | grep -v "^\.env\.example$"` is empty
 - [ ] Devpost submitted (not just a draft) before the deadline; confirmation email received
