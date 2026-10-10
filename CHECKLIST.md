@@ -34,11 +34,11 @@ Deadline: **Oct 31, 9:15 AM IST** (= Oct 30, 11:45 PM ET). Internal target: **Oc
 - [ ] Supabase and OAuth providers (GitHub, Google) used within their terms; OAuth app names say "Gulliver", not Qloo
 
 ## 3. Required submission items (Devpost "What to Submit")
-- [ ] **Functional demo link**: live, end-to-end, externally hosted (Vercel), no login needed
+- [ ] **Functional demo link**: live, end-to-end, externally hosted (Vercel), no login needed. Submit the **production domain** https://gulliver-one.vercel.app only: deployment and branch URLs sit behind Vercel Deployment Protection (302 to a Vercel login)
 - [ ] Demo stays free and unrestricted **until judging ends (Nov 17, 10:15 AM IST)**: Vercel, OpenRouter credit, and Qloo key all alive
 - [ ] **Public repo** (GitHub) with all source, assets, and run instructions
 - [ ] **Open-source license** (MIT) `LICENSE` file, detected and **shown in the repo About section**
-- [ ] About section: description + website = demo URL
+- [x] About section: description + website = demo URL (https://gulliver-one.vercel.app, set Oct 10)
 - [ ] **Text description** on Devpost: features, functionality, and what makes it Qloo-powered
 - [ ] If any page were private: test credentials in the instructions (N/A: no login)
 

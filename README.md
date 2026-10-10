@@ -1,5 +1,7 @@
 # Gulliver
 
+**Live demo: https://gulliver-one.vercel.app** (click "Explore as guest", no account needed)
+
 **Every city, sized up.** A tour intelligence agent for independent promoters, venues and talent agents, grounded in [Qloo](https://qloo.com)'s taste graph. Built for the Qloo Agentic Hackathon.
 
 > Work in progress. The full README (problem, Qloo endpoints used, walkthrough, setup, limitations) lands before submission.
