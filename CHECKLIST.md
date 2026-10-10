@@ -28,7 +28,7 @@ Deadline: **Oct 31, 9:15 AM IST** (= Oct 30, 11:45 PM ET). Internal target: **Oc
 ## 2b. Accounts & user data (added with login)
 - [ ] **One-click "Explore as guest"** on the landing page; no feature a judge needs sits behind a sign-up (guest flow click-tested Oct 10; landing CTA still goes via /login)
 - [ ] Testing instructions on Devpost say "click Explore as guest" (rules: private sites must give access)
-- [x] RLS enabled on every table; anon key only in the browser; no service-role key anywhere in the app (`npm run rls`: 18/18 attack checks pass, Oct 10)
+- [x] RLS enabled on every table; anon key only in the browser; no service-role key anywhere in the app (`npm run rls`: 19/19 attack checks pass incl. 12-way concurrent saves, Oct 10)
 - [ ] Privacy note in the app: what we store (email or OAuth id, roster, saved briefs), and how to delete it
 - [x] Delete-account / delete-data path works (DB: `npm run rls`; UI click-tested Oct 10)
 - [ ] Supabase and OAuth providers (GitHub, Google) used within their terms; OAuth app names say "Gulliver", not Qloo
