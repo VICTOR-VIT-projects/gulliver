@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "spike": "node --env-file=.env scripts/spike.ts"
+    "spike": "node --env-file=.env scripts/spike.ts",
+    "rls": "node --env-file=.env scripts/rls-check.ts"
   },
   "license": "MIT",
   "dependencies": {
@@ -28,5 +29,6 @@
   "private": true,
   "engines": {
     "node": ">=22.18"
-  }
+  },
+  "type": "module"
 }
