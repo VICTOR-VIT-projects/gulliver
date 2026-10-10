@@ -36,9 +36,4 @@ export async function currentUser() {
   return { id: claims.sub, email: claims.email as string | undefined, isGuest: claims.is_anonymous === true };
 }
 
-/** Only same-site paths are allowed as post-login destinations (no open redirects). */
-export function safeNext(value: unknown, fallback = "/board"): string {
-  return typeof value === "string" && value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\")
-    ? value
-    : fallback;
-}
+export { safeNext } from "../safe-next";

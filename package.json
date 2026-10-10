@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "spike": "node --env-file=.env scripts/spike.ts",
-    "rls": "node --env-file=.env scripts/rls-check.ts"
+    "rls": "node --env-file=.env scripts/rls-check.ts",
+    "test": "node scripts/check-safe-next.ts"
   },
   "license": "MIT",
   "dependencies": {

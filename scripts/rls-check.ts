@@ -54,6 +54,19 @@ try {
   r = await call("/rest/v1/briefs", { method: "POST", token: a.token, headers: rep, body: JSON.stringify({ act_id: ACT, act_name: "Khruangbin", payload: { test: 2 } }) });
   expect("A's second brief is No. 2", r.body?.[0]?.number === 2, `number=${r.body?.[0]?.number}`);
 
+  // 12 at once reliably reproduced duplicate numbers before migration 20261010140000.
+  const burst = await Promise.all(
+    Array.from({ length: 12 }, (_, i) =>
+      call("/rest/v1/briefs", { method: "POST", token: a.token, headers: rep, body: JSON.stringify({ act_id: ACT, act_name: "Khruangbin", payload: { burst: i } }) }),
+    ),
+  );
+  const numbers = burst.map((x) => x.body?.[0]?.number).sort((p, q) => p - q);
+  expect(
+    "12 simultaneous saves all succeed with distinct numbers",
+    burst.every((x) => x.status === 201) && numbers.join() === Array.from({ length: 12 }, (_, i) => i + 3).join(),
+    `statuses=${burst.map((x) => x.status)} numbers=${numbers}`,
+  );
+
   r = await call("/rest/v1/roster?select=*", { token: b.token });
   expect("B cannot see A's roster", r.status === 200 && Array.isArray(r.body) && r.body.length === 0, `${r.status} rows=${r.body?.length}`);
   r = await call("/rest/v1/briefs?select=*", { token: b.token });

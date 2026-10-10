@@ -5,7 +5,8 @@
   --color-paper-deep: #e8dcc5;
   --color-ink: #1c1b18;
   --color-ink-soft: #46423a;
-  --color-muted: #7a715f;
+  /* 5.1:1 on paper, so small labels still meet WCAG AA with the grain on top. */
+  --color-muted: #6a6152;
   --color-rule: #cbbfa6;
   /* One spot colour, as on a two-colour gig poster. signal-ink is the text-safe shade (AA on paper). */
   --color-signal: #d2452b;
